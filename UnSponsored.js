@@ -1,52 +1,101 @@
-chrome.storage.sync.get('enabled', function(data) {
-  var isEnabled = data.enabled;
-  if (isEnabled === undefined) {
-    isEnabled = true; // Default to true if the value is not set
+(function () {
+  'use strict';
+
+  const api = typeof browser !== 'undefined' ? browser : chrome;
+
+  const SITE_SELECTORS = {
+    'google': [
+      '[data-text-ad="1"]',
+      '[data-is-ad="1"]',
+      '#tads',
+      '#bottomads',
+      'div[aria-label="Ads"]',
+      'div[aria-label="Anzeigen"]'
+    ],
+    'mobile.de': [
+      '[data-testid*="sponsored" i]',
+      '[data-testid*="-ad-" i]',
+      '[data-testid$="-ad"]',
+      '[class*="sponsored" i]',
+      '[class*="-ad-"]',
+      '.cBox-body--vehicleSponsoredHits',
+      '.cBox-body--resultListSponsoredHits',
+      '.dsp-cBox',
+      '#srp-top-ad',
+      '#srp-bottom-ad'
+    ],
+    'ecosia.org': [
+      '.mainline__result--ad',
+      '.result--ad',
+      '[data-test-id*="ad" i][data-test-id*="result" i]',
+      '[class*="result--ad"]',
+      '[class*="-ad-result"]',
+      '.card-ad',
+      '.card-ad-mainline'
+    ]
+  };
+
+  function getSiteKey() {
+    const host = location.hostname;
+    if (host.endsWith('.google.com') || host.endsWith('.google.co.uk') || host.endsWith('.google.de')) {
+      return 'google';
+    }
+    if (host.endsWith('mobile.de')) {
+      return 'mobile.de';
+    }
+    if (host.endsWith('ecosia.org')) {
+      return 'ecosia.org';
+    }
+    return null;
   }
 
-  if (isEnabled) {
-    hideSponsoredElements();
+  const STYLE_ID = 'unsponsored-hide-style';
+
+  function buildHideStyle(selectors) {
+    return selectors.join(',\n') + ' { display: none !important; }';
   }
-});
 
-function hideSponsoredElements() {
-  // Select elements with data-text-ad="1"
-  let textAdElements = document.querySelectorAll('[data-text-ad="1"]');
-  textAdElements.forEach(element => {
-    element.style.display = 'none';
-  });
-
-  // Select elements with data-is-ad="1"    <---------------------------This attr will find sponsored links in mapview short list
-  let isAdElements = document.querySelectorAll('[data-is-ad="1"]');
-  isAdElements.forEach(element => {
-    element.style.display = 'none';
-  });
-
-  console.log('Number of text ad elements hidden:', textAdElements.length);
-  console.log('Number of is-ad elements hidden:', isAdElements.length);
-}
-
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.enabled) {
-    hideSponsoredElements();
-  } else {
-    showSponsoredElements();
+  function applyHiding(selectors) {
+    let style = document.getElementById(STYLE_ID);
+    const css = buildHideStyle(selectors);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = STYLE_ID;
+      style.textContent = css;
+      (document.head || document.documentElement).appendChild(style);
+    } else {
+      style.textContent = css;
+    }
   }
-});
 
-function showSponsoredElements() {
-  // Select elements with data-text-ad="1"
-  let textAdElements = document.querySelectorAll('[data-text-ad="1"]');
-  textAdElements.forEach(element => {
-    element.style.display = 'block'; // Assuming "block" is the default display for these elements
+  function removeHiding() {
+    const style = document.getElementById(STYLE_ID);
+    if (style && style.parentNode) {
+      style.parentNode.removeChild(style);
+    }
+  }
+
+  const siteKey = getSiteKey();
+  if (!siteKey) {
+    return;
+  }
+  const selectors = SITE_SELECTORS[siteKey];
+
+  api.storage.sync.get('enabled', function (data) {
+    const isEnabled = data.enabled === undefined ? true : data.enabled;
+    if (isEnabled) {
+      applyHiding(selectors);
+    }
   });
 
-  // Select elements with data-is-ad="1"
-  let isAdElements = document.querySelectorAll('[data-is-ad="1"]');
-  isAdElements.forEach(element => {
-    element.style.display = 'block';
+  api.runtime.onMessage.addListener(function (request) {
+    if (!request || typeof request.enabled !== 'boolean') {
+      return;
+    }
+    if (request.enabled) {
+      applyHiding(selectors);
+    } else {
+      removeHiding();
+    }
   });
-
-  console.log('Number of text ad elements shown:', textAdElements.length);
-  console.log('Number of is-ad elements shown:', isAdElements.length);
-}
+})();
